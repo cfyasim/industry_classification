@@ -12,6 +12,7 @@ import numpy as np
 import torch
 from functools import lru_cache
 from transformers import AutoTokenizer
+import os
 
 
 @lru_cache()
@@ -22,6 +23,8 @@ def get_settings():
 settings = get_settings()
 logger_config.dictConfig(settings.LOGGING)
 
+num_cores = 4 # This value should be 4 on inf1.xlarge and inf1.2xlarge
+os.environ['NEURON_RT_NUM_CORES'] = str(num_cores)
 
 @lru_cache()
 def get_bert_classifier():
@@ -79,8 +82,12 @@ async def predict_industry(story: BertText,
             truncation=True,
             return_tensors="pt",
         )
-
-        logits = neuron_model(*encoding)[0][0]
+        example_inputs_paraphrase = (
+            encoding["input_ids"],
+            encoding["attention_mask"],
+            encoding["token_type_ids"],
+        )
+        logits = neuron_model(*example_inputs_paraphrase)[0][0]
         sigmoid = torch.nn.Sigmoid()
         probs = sigmoid(logits.squeeze().cpu())
         predictions = np.zeros(probs.shape)
