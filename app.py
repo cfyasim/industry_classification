@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from functools import lru_cache
 from transformers import AutoTokenizer
-import os
+import torch.neuron
 
 
 @lru_cache()
@@ -28,12 +28,15 @@ os.environ['NEURON_RT_NUM_CORES'] = str(num_cores)
 
 @lru_cache()
 def get_bert_classifier():
-    neuron_model = torch.jit.load(f"{settings.INF_INDUSTRY_MODEL_FILE_NAME}/")
+    topic_neuron_model = torch.jit.load(f"{settings.INF_TOPIC_MODEL_FILE_NAME}")
+    neuron_model = torch.jit.load(f"{settings.INF_INDUSTRY_MODEL_FILE_NAME}")
     industry_tokenizer = AutoTokenizer.from_pretrained(
+        f"{settings.INDUSTRY_MODEL_FILE_NAME}/")
+    topic_tokenizer = AutoTokenizer.from_pretrained(
         f"{settings.TOPIC_MODEL_FILE_NAME}/")
-    return neuron_model, industry_tokenizer
+    return neuron_model, industry_tokenizer, topic_neuron_model, topic_tokenizer
 
-neuron_model, tokenizer = get_bert_classifier()
+neuron_model, tokenizer, topic_neuron_model, topic_tokenizer = get_bert_classifier()
 app = FastAPI(docs_url=None, redoc_url=None)
 security = HTTPBasic()
 
@@ -97,10 +100,54 @@ async def predict_industry(story: BertText,
         industry_tags = [INDUSTRY_MAPPING[int(i)] for i in predicted_labels]
         output_labels = {'predicted_tags': industry_tags, "story_id": story_id}
         logger.info(
-            f"Bert Classifier: completed prediction  for story_id: {story_id} "
+            f"Industry Bert Classifier: completed prediction  for story_id: {story_id} "
             f"in {(datetime.now() - dt).total_seconds()} Seconds")
         return output_labels
     except Exception as err:
         logger.error(
-            f"Bert Classifier: Error occurred for story id :{story_id} "
+            f"Industry Bert Classifier: Error occurred for story id :{story_id} "
+            f" Error: {err} , Traceback: {traceback.format_exc()}")
+
+
+@app.post('/predict/topic/')
+async def predict_industry(story: BertText,
+                        auth_status: int = Depends(is_authenticated_user)):
+    """This api is used to tag Industry from Text.
+
+    params: story: BertText
+    Return: Tagged Entities
+    """
+    story_id = ""
+    try:
+        dt = datetime.now()
+        data = story.dict()['story']
+        input_text, story_id = data['story_text'], data['story_id']
+        max_length = 128
+        encoding = topic_tokenizer.encode_plus(
+            input_text,
+            max_length=max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt",
+        )
+        example_inputs_paraphrase = (
+            encoding["input_ids"],
+            encoding["attention_mask"],
+            encoding["token_type_ids"],
+        )
+        logits = topic_neuron_model(*example_inputs_paraphrase)[0][0]
+        sigmoid = torch.nn.Sigmoid()
+        probs = sigmoid(logits.squeeze().cpu())
+        predictions = np.zeros(probs.shape)
+        predictions[np.where(probs >= 0.5)] = 1
+        predicted_labels = [CLASSES[idx] for idx, label in
+                            enumerate(predictions) if label == 1]
+        output_labels = {'predicted_tags': predicted_labels, "story_id": story_id}
+        logger.info(
+            f"Topic Bert Classifier: completed prediction  for story_id: {story_id} "
+            f"in {(datetime.now() - dt).total_seconds()} Seconds")
+        return output_labels
+    except Exception as err:
+        logger.error(
+            f"Topic Bert Classifier: Error occurred for story id :{story_id} "
             f" Error: {err} , Traceback: {traceback.format_exc()}")

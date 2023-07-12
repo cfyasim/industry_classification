@@ -8,7 +8,9 @@ class BertClassifierSettings(BaseSettings):
     BERT_CLASSIFICATION_USERNAME: str = ''
     BERT_CLASSIFICATION_PASSWORD: str = ''
     INDUSTRY_MODEL_FILE_NAME = ''
+    TOPIC_MODEL_FILE_NAME = ''
     INF_INDUSTRY_MODEL_FILE_NAME = ''
+    INF_TOPIC_MODEL_FILE_NAME = ''
     LOGGING = {
         'version': 1,
         'disable_existing_loggers': False,
